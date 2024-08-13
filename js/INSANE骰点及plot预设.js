@@ -82,7 +82,8 @@ if (!seal.ext.find('insane')){
 }
 
 let cmdin =seal.ext.newCmdItemInfo();
-cmdin.name='使用说明：\n.set ins//开启insane拓展规则\n.sn ins//自动修改群名片，使用前请set ins\n.ins(目标修正值) //进行检定，注意指令格式//修正值不填默认为0，目标值默认为5\n.plot help//设置预设内容，help查看详情';//帮助内容
+cmdin.name='ins';//指令名
+cmdin.help='使用说明：\n.set ins//开启insane拓展规则\n.sn ins//自动修改群名片，使用前请set ins\n.ins(目标修正值) //进行检定，注意指令格式//修正值不填默认为0，目标值默认为5\n.plot help//设置预设内容，help查看详情';//帮助内容
 
 cmdin.solve=(ctx,msg,cmdArgs)=>{
     let name=seal.format(ctx,"{$t玩家}");
@@ -107,7 +108,7 @@ cmdin.solve=(ctx,msg,cmdArgs)=>{
             seal.replyToSender(ctx,msg,`${name}掷出的结果为：2D6=${dice}/${result}（大失败）`)
                     return seal.ext.newCmdExecuteResult(true);
             }
-            else if (result>=judge){
+            else if (dice>=result){
                 seal.replyToSender(ctx,msg,`${name}掷出的结果为：2D6=${dice}/${result}(成功)`)
                 return seal.ext.newCmdExecuteResult(true);
             }
@@ -212,3 +213,4 @@ function retrieveGroupPlot(groupid) {
 function saveGroupPlot(groupid, content) {
     extension.storageSet(`gplot_${groupid}`, JSON.stringify(content));
 }
+
