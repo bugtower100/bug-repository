@@ -1,12 +1,13 @@
 // ==UserScript==
-// @name         鼠鼠！Rat！TRPG规则
+// @name         鼠鼠！规则
 // @author       bug人@
 // @version      1.0.0
-// @description  鼠鼠！掷骰规则，使用帮助见.rat help
+// @description  鼠鼠！掷骰规则，暂时没联动自动卡
 // @timestamp    20240710
 // @diceRequireVer 1.0.0
 // @license      Apache-2
 // @homepageURL  https://github.com/sealdice/javascript
+// @updateUrl    https://raw.githubusercontent.com/bugtower100/bug-repository/main/js/%E9%BC%A0%E9%BC%A0%EF%BC%81Rat%EF%BC%81%E8%A7%84%E5%88%99.js
 // ==/UserScript==
 
 //set&sn设置名片
@@ -251,4 +252,3 @@ cmdrt.solve=(ctx,msg,cmdArgs)=>{
 };
 // 将命令注册到扩展中
 exti.cmdMap['rat'] = cmdrt;
-
