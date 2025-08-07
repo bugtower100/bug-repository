@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         狩魂者骰子插件
 // @author       bug
-// @version      1.0.0
+// @version      1.0.2
 // @description  狩魂者TRPG骰子系统插件，使用.sh help 查看帮助。改编自Desom-fu大佬（121096913）的狩魂者插件，特别鸣谢Desom-fu大佬的无私分享！
 // @timestamp    1754370401
 // @license      MIT
@@ -13,7 +13,7 @@ const shouhunTemplate = {
     "name": "shouhun",
     "fullname": "狩魂者",
     "authors": ["bug"],
-    "version": "1.0.0",
+    "version": "1.0.2",
     "updatedTime": "20250805",
 
     "nameTemplate": {
@@ -101,7 +101,7 @@ try {
 
 let ext = seal.ext.find('shouhun');
 if (!ext) {
-    ext = seal.ext.new('shouhun', 'bug', '1.0.0');
+    ext = seal.ext.new('shouhun', 'bug', '1.0.2');
 }
 
 // 技能别名映射表 - 与海豹自带属性名称保持一致
@@ -122,7 +122,6 @@ const SKILL_ALIASES = {
     // 衍生属性
     '力量': ['力量', 'STR', 'str'],
     '敏捷': ['敏捷', 'DEX', 'dex'],
-    '感知': ['感知', '洞察', 'PER', 'per'],
     '意志': ['意志', 'WIL', 'wil'],
 
     // 基础技能
@@ -133,6 +132,7 @@ const SKILL_ALIASES = {
     '学识': ['学识', '知识', '狩魂学识'],
     '调查': ['调查', '侦查', '侦察', '搜索'],
     '交涉': ['交涉', '说服', '欺骗', '威吓', '社交'],
+    '感知': ['感知', '洞察', 'PER', 'per'],
 
     // 符咒技能
     '护身符制作': ['护身符制作', '制符', '符咒制作'],
@@ -226,7 +226,7 @@ function isValidBoundary(expression, pos) {
 }
 
 // 贪婪匹配技能替换
-function replaceSkillsGreedy(expression, skillDict) {
+function replaceSkillsGreedy(expression, skillDict, ctx) {
     // 获取所有可能的技能名（包括别名）
     const allSkills = [];
     for (const [canonicalName, aliases] of Object.entries(SKILL_ALIASES)) {
@@ -244,19 +244,45 @@ function replaceSkillsGreedy(expression, skillDict) {
     while (i < expression.length) {
         let matched = false;
 
-        // 尝试匹配每个技能名
-        for (const skill of allSkills) {
-            const skillName = skill.name;
-            if (expression.substring(i).toUpperCase().startsWith(skillName.toUpperCase())) {
-                const nextPos = i + skillName.length;
-                if (isValidBoundary(expression, nextPos)) {
-                    const canonicalName = skill.canonical;
-                    const skillValue = skillDict[canonicalName];
-                    if (skillValue !== undefined) {
-                        result += skillValue.toString();
-                        i = nextPos;
-                        matched = true;
-                        break;
+        // 首先尝试直接从角色卡读取属性（优先级最高）
+        let attrName = "";
+        let j = i;
+        while (j < expression.length) {
+            const char = expression[j];
+            if (/[\u4e00-\u9fa5a-zA-Z0-9]/.test(char)) {
+                attrName += char;
+                j++;
+            } else {
+                break;
+            }
+        }
+        
+        if (attrName.length > 0 && isValidBoundary(expression, i + attrName.length)) {
+            // 尝试从角色卡直接读取属性值
+            const attrValue = seal.format(ctx, `{${attrName}}`);
+            const numValue = parseInt(attrValue);
+            if (!isNaN(numValue)) {
+                result += numValue.toString();
+                i += attrName.length;
+                matched = true;
+            }
+        }
+
+        // 如果直接读取失败，再尝试匹配预定义技能
+        if (!matched) {
+            for (const skill of allSkills) {
+                const skillName = skill.name;
+                if (expression.substring(i).toUpperCase().startsWith(skillName.toUpperCase())) {
+                    const nextPos = i + skillName.length;
+                    if (isValidBoundary(expression, nextPos)) {
+                        const canonicalName = skill.canonical;
+                        const skillValue = skillDict[canonicalName];
+                        if (skillValue !== undefined) {
+                            result += skillValue.toString();
+                            i = nextPos;
+                            matched = true;
+                            break;
+                        }
                     }
                 }
             }
@@ -423,8 +449,8 @@ function performShouhunCheck(ctx, frontExpr, backExpr, modifiers) {
         }
         
         // 技能替换
-        const frontResolved = replaceSkillsGreedy(frontExpr, skillDict);
-        const backResolved = replaceSkillsGreedy(backExpr, skillDict);
+        const frontResolved = replaceSkillsGreedy(frontExpr, skillDict, ctx);
+        const backResolved = replaceSkillsGreedy(backExpr, skillDict, ctx);
 
         // 处理指定D20值
         let frontFinal = frontResolved;
