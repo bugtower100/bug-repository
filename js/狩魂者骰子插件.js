@@ -18,7 +18,7 @@ const shouhunTemplate = {
 
     "nameTemplate": {
         "sh": {
-            "template": "{$t玩家_RAW} HP{生命值}/{生命值max} MP{魔力值}/{魔力值max} SHM{狩魂值}/{狩魂值max}",
+            "template": "{$t玩家_RAW} HP{HP}/{HPMAX} MP{MP}/{MPMAX} SHM{SHM}/{SHMMAX}",
             "helpText": "自动设置狩魂者名片"
         }
     },
@@ -40,13 +40,13 @@ const shouhunTemplate = {
     },
 
     "alias": {
-        "HP": ["生命值", "HP", "生命", "体力", "HITPOINTS", "血量"],
-        "HPMAX": ["生命上限", "HPMAX", "生命值上限"],
-        "MP": ["灵力值", "MP", "灵力", "魔法", "MAGICPOINTS"],
-        "MPMAX": ["灵力值上限", "MPMAX", "灵力上限", "魔法上限", "MAGICPOINTSMAX"],
-        "SHM": ["SHM", "时髦值", "时髦"],
-        "SHMMAX": ["SHMMAX", "时髦值上限", "时髦上限"],
-        "EXP": ["经验", "EXP"],
+        "HP": ["生命值", "HP", "生命", "体力", "HITPOINTS", "血量", "hp"],
+        "HPMAX": ["生命上限", "HPMAX", "生命值上限", "hpmax"],
+        "MP": ["灵力值", "MP", "灵力", "魔法", "MAGICPOINTS", "mp"],
+        "MPMAX": ["灵力值上限", "MPMAX", "灵力上限", "魔法上限", "MAGICPOINTSMAX", "mpmax"],
+        "SHM": ["SHM", "时髦值", "时髦", "shm"],
+        "SHMMAX": ["SHMMAX", "时髦值上限", "时髦上限", "shmmax"],
+        "EXP": ["经验", "EXP", "exp"],
         "武技强度": ["武技强度", "武技"],
         "术法强度": ["术法强度", "术法"],
         "灵能力强度": ["灵能力强度", "灵能力"],
@@ -68,13 +68,13 @@ const shouhunTemplate = {
     },
 
     "attrConfig": {
-        "top": ['生命值', '魔力值', '狩魂值', '体质', '智慧', '魂力'],
+        "top": ['HP', 'MP', 'SHM', '体质', '智慧', '魂力'],
         "sortBy": "name",
         "ignores": [],
         "showAs": {
-            "生命值": "{生命值}/{生命值max}",
-            "魔力值": "{魔力值}/{魔力值max}",
-            "狩魂值": "{狩魂值}/{狩魂值max}"
+            "HP": "{HP}/{HPMAX}",
+            "MP": "{MP}/{MPMAX}",
+            "SHM": "{SHM}/{SHMMAX}"
         }
     },
 
@@ -82,7 +82,7 @@ const shouhunTemplate = {
         "diceSides": 20,
         "enableTip": "已切换至20面骰，并自动开启狩魂者规则。详情通过.sh help查看。",
         "keys": ["sh", "shouhun", "狩魂者"],
-        "relatedExt": ["shouhun"]
+        "relatedExt": ["shouhun", "coc7"]
     }
 };
 
