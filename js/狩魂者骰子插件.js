@@ -257,7 +257,8 @@ function replaceSkillsGreedy(expression, skillDict, ctx) {
             }
         }
         
-        if (attrName.length > 0 && isValidBoundary(expression, i + attrName.length)) {
+        // 只有当属性名不包含骰子表达式（如"d"字符）且是有效边界时才尝试读取
+        if (attrName.length > 0 && !attrName.toLowerCase().includes('d') && isValidBoundary(expression, i + attrName.length)) {
             // 尝试从角色卡直接读取属性值
             const attrValue = seal.format(ctx, `{${attrName}}`);
             const numValue = parseInt(attrValue);
@@ -335,14 +336,24 @@ function rollDiceExpressionDetailed(ctx, expression) {
     const d20Results = [];
     
     try {
-        // 如果表达式不包含骰子，直接返回数值
+        // 如果表达式不包含骰子，尝试通过seal.format计算
         if (!expression.includes('d')) {
-            const value = parseInt(expression) || 0;
-            return {
-                detail: value.toString(),
-                value: value,
-                d20Results: []
-            };
+            try {
+                const result = seal.format(ctx, `{${expression}}`);
+                const value = parseInt(result) || 0;
+                return {
+                    detail: `${expression} = ${value}`,
+                    value: value,
+                    d20Results: []
+                };
+            } catch (e) {
+                const value = parseInt(expression) || 0;
+                return {
+                    detail: value.toString(),
+                    value: value,
+                    d20Results: []
+                };
+            }
         }
         
         // 查找所有骰子表达式，支持多个骰子组合
@@ -452,15 +463,9 @@ function performShouhunCheck(ctx, frontExpr, backExpr, modifiers) {
         const frontResolved = replaceSkillsGreedy(frontExpr, skillDict, ctx);
         const backResolved = replaceSkillsGreedy(backExpr, skillDict, ctx);
 
-        // 处理指定D20值
+        // 直接使用解析后的表达式
         let frontFinal = frontResolved;
         let backFinal = backResolved;
-
-        if (modifiers.fixedD20 !== null) {
-            // 替换D20为固定值
-            frontFinal = frontFinal.replace(/1?d20/gi, modifiers.fixedD20.toString());
-            backFinal = backFinal.replace(/1?d20/gi, modifiers.fixedD20.toString());
-        }
         
         // 计算骰子结果
         const frontRoll = rollDiceExpressionDetailed(ctx, frontFinal);
@@ -469,7 +474,7 @@ function performShouhunCheck(ctx, frontExpr, backExpr, modifiers) {
         const backResult = backRoll.value;
 
         // 获取D20结果用于特殊效果计算
-        const frontD20s = modifiers.fixedD20 !== null ? [modifiers.fixedD20] : frontRoll.d20Results;
+        const frontD20s = frontRoll.d20Results;
         const backD20s = backRoll.d20Results;
 
         // 计算基础成功等级
@@ -598,8 +603,7 @@ function parseShouhunCommand(cmdText) {
         selfBonus: 0,
         selfPenalty: 0,
         opponentBonus: 0,
-        opponentPenalty: 0,
-        fixedD20: null
+        opponentPenalty: 0
     };
 
     let remaining = cmdText;
@@ -629,15 +633,10 @@ function parseShouhunCommand(cmdText) {
         } else {
             modifiers.selfPenalty = value;
         }
-        remaining = remaining.substring(bpMatch[0].length);
+        remaining = remaining.substring(bpMatch[0].length).trim();
     }
 
-    // 解析指定D20值
-    const xMatch = remaining.match(/^x(\d+)/);
-    if (xMatch) {
-        modifiers.fixedD20 = parseInt(xMatch[1]);
-        remaining = remaining.substring(xMatch[0].length);
-    }
+
 
     // 分离前式和后式
     const parts = remaining.split('#');
@@ -651,6 +650,7 @@ function parseShouhunCommand(cmdText) {
 
     // 解析后式的奖励/惩罚
     if (parts[1]) {
+        backExpr = backExpr.trim();
         const backBpMatch = backExpr.match(/^([bp])(\d+)\s*(.*)/);
         if (backBpMatch) {
             const type = backBpMatch[1];
@@ -710,7 +710,6 @@ function handleShouhunCheck(mctx, msg, cmdArgs) {
         if (tempParsed.modifiers.isHidden) modifierText += 'h';
         if (tempParsed.modifiers.selfBonus > 0) modifierText += `b${tempParsed.modifiers.selfBonus}`;
         if (tempParsed.modifiers.selfPenalty > 0) modifierText += `p${tempParsed.modifiers.selfPenalty}`;
-        if (tempParsed.modifiers.fixedD20 !== null) modifierText += `x${tempParsed.modifiers.fixedD20}`;
         
         processedCmdText = `${modifierText}${frontExpr}#${backExpr}`;
     }
@@ -807,7 +806,6 @@ cmdShouhun.help = `=== 狩魂者TRPG骰子插件 ===
 h     - 暗骰，结果私发给投掷者
 b数字 - 奖励成功等级（如：b2）
 p数字 - 惩罚成功等级（如：p1）
-x数字 - 指定D20固定值（如：x20）
 #     - 分隔前式(出值)和后式(挑战值)
 
 【默认骰机制】
@@ -831,8 +829,8 @@ x数字 - 指定D20固定值（如：x20）
 .sh b2 运动#p1 体魄
   → 奖励2等级的运动检定，对抗惩罚1等级的体魄
 
-.sh h x20 说服
-  → 暗骰，D20固定为20的说服检定
+.sh h 说服
+  → 暗骰的说服检定
 
 .sh @bug猫 调查
   → 代替张三进行调查技能检定
