@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         狩魂者骰子插件
 // @author       bug
-// @version      1.0.2
+// @version      2.0.0
 // @description  狩魂者TRPG骰子系统插件，使用.sh help 查看帮助。改编自Desom-fu大佬（121096913）的狩魂者插件，特别鸣谢Desom-fu大佬的无私分享！
 // @timestamp    1754370401
 // @license      MIT
@@ -10,10 +10,10 @@
 
 // 狩魂者游戏系统模板
 const shouhunTemplate = {
-    "name": "shouhun",
-    "fullname": "狩魂者",
+    "name": "狩魂者",
+    "fullname": "狩魂者TRPG",
     "authors": ["bug"],
-    "version": "1.0.2",
+    "version": "2.0.0",
     "updatedTime": "20250805",
 
     "nameTemplate": {
@@ -99,9 +99,9 @@ try {
     }
 }
 
-let ext = seal.ext.find('shouhun');
+let ext = seal.ext.find('狩魂者');
 if (!ext) {
-    ext = seal.ext.new('shouhun', 'bug', '1.0.2');
+    ext = seal.ext.new('狩魂者', 'bug', '2.0.0');
 }
 
 // 技能别名映射表 - 与海豹自带属性名称保持一致
@@ -332,10 +332,20 @@ function rollDiceExpression(ctx, expression) {
 }
 
 // 获取详细的骰子投掷结果，同时记录D20原始结果
-function rollDiceExpressionDetailed(ctx, expression) {
+function rollDiceExpressionDetailed(ctx, expression, modifiers = null) {
     const d20Results = [];
     
     try {
+        // 首先替换表达式中的属性值
+        const skillDict = {};
+        for (const [skillName, aliases] of Object.entries(SKILL_ALIASES)) {
+            const value = getAttributeValue(skillName, ctx);
+            if (value !== null) {
+                skillDict[skillName] = value;
+            }
+        }
+        expression = replaceSkillsGreedy(expression, skillDict, ctx);
+        
         // 如果表达式不包含骰子，尝试通过seal.format计算
         if (!expression.includes('d')) {
             try {
@@ -356,8 +366,8 @@ function rollDiceExpressionDetailed(ctx, expression) {
             }
         }
         
-        // 查找所有骰子表达式，支持多个骰子组合
-        const diceRegex = /(\d*)d(\d+)/g;
+        // 查找所有骰子表达式，支持多个骰子组合，包括括号表达式
+        const diceRegex = /(\([^)]+\)|（[^）]+）|\d*)d(\d+)/g;
         const matches = [...expression.matchAll(diceRegex)];
         
         if (matches.length === 0) {
@@ -372,22 +382,50 @@ function rollDiceExpressionDetailed(ctx, expression) {
         }
         
         let processedExpression = expression;
-        let totalValue = 0;
         const diceDetails = [];
+        const diceSums = [];
         
         // 处理每个骰子表达式
         for (const match of matches) {
-            const fullMatch = match[0]; // 完整匹配，如 "3d4"
-            const diceCount = parseInt(match[1]) || 1;
+            const fullMatch = match[0]; // 完整匹配，如 "3d4" 或 "（心魂/2）d4"
+            let diceCountStr = match[1];
             const diceSides = parseInt(match[2]);
+            
+            // 计算骰子数量
+            let diceCount;
+            if (!diceCountStr || diceCountStr === '') {
+                diceCount = 1;
+            } else if ((diceCountStr.startsWith('（') && diceCountStr.endsWith('）')) || (diceCountStr.startsWith('(') && diceCountStr.endsWith(')'))) {
+                // 处理括号表达式，如（心魂/2）或 (心魂/2)
+                const innerExpr = diceCountStr.slice(1, -1); // 去掉括号
+                try {
+                    const result = seal.format(ctx, `{${innerExpr}}`);
+                    diceCount = parseInt(result) || 1;
+                } catch (e) {
+                    diceCount = 1;
+                }
+            } else {
+                diceCount = parseInt(diceCountStr) || 1;
+            }
             
             // 分别投掷每个骰子
             const diceResults = [];
             let diceSum = 0;
             
             for (let i = 0; i < diceCount; i++) {
-                const rollResult = seal.format(ctx, `{1d${diceSides}}`);
-                const diceValue = parseInt(rollResult) || 1;
+                let diceValue;
+                
+                // 如果是D20且设置了固定值，使用固定值
+                if (diceSides === 20 && modifiers && modifiers.fixedD20 !== null && modifiers.fixedD20 !== undefined) {
+                    diceValue = modifiers.fixedD20;
+                } else {
+                    const rollResult = seal.format(ctx, `{1d${diceSides}}`);
+                    diceValue = parseInt(rollResult);
+                    if (isNaN(diceValue) || diceValue < 1) {
+                        diceValue = 1;
+                    }
+                }
+                
                 diceResults.push(diceValue);
                 diceSum += diceValue;
                 
@@ -398,30 +436,74 @@ function rollDiceExpressionDetailed(ctx, expression) {
             }
             
             // 构建这组骰子的详细显示
-            const diceDetail = `[${diceResults.join('+')}]`;
+            let diceDetail;
+            const hasChineseParen = diceCountStr && diceCountStr.startsWith('（') && diceCountStr.endsWith('）');
+            const hasAsciiParen = diceCountStr && diceCountStr.startsWith('(') && diceCountStr.endsWith(')');
+            if (hasChineseParen || hasAsciiParen) {
+                // 对于括号表达式，显示计算过程和骰子结果，并沿用原括号样式
+                const innerExpr = diceCountStr.slice(1, -1);
+                const l = hasChineseParen ? '（' : '(';
+                const r = hasChineseParen ? '）' : ')';
+                diceDetail = `${l}${innerExpr}=${diceCount}${r}[${diceResults.join(',')}]`;
+            } else {
+                diceDetail = `[${diceResults.join(',')}]`;
+            }
             diceDetails.push(diceDetail);
+            diceSums.push(diceSum);
             
             // 在表达式中替换骰子为具体数值
             processedExpression = processedExpression.replace(fullMatch, diceSum.toString());
         }
         
         // 计算最终结果（包括修正值）
-        const finalResult = seal.format(ctx, `{${processedExpression}}`);
-        const finalValue = parseInt(finalResult) || 0;
+        let finalValue;
+        try {
+            // 使用更安全的表达式求值
+            finalValue = Function('"use strict"; return (' + processedExpression + ')')();
+            if (isNaN(finalValue)) {
+                finalValue = 0;
+            }
+        } catch (e) {
+            // 如果Function求值失败，回退到seal.format
+            const finalResult = seal.format(ctx, `{${processedExpression}}`);
+            finalValue = parseInt(finalResult) || 0;
+        }
         
         // 构建完整的详细显示
-        let detail;
-        if (matches.length === 1 && processedExpression === matches[0][0].replace(matches[0][0], diceDetails[0].slice(1, -1).split('+').reduce((a, b) => parseInt(a) + parseInt(b), 0).toString())) {
-            // 单个骰子组且无修正值
-            detail = `${diceDetails[0]}=${finalValue}`;
-        } else {
-            // 多个骰子或有修正值
-            let detailExpression = expression;
-            for (let i = 0; i < matches.length; i++) {
-                detailExpression = detailExpression.replace(matches[i][0], diceDetails[i]);
-            }
-            detail = `${detailExpression}=${finalValue}`;
+        let detailExpression = expression;
+        let detailParts = [];
+        let baseValue = 0;
+        
+        // 计算基础值（非骰子部分）
+        let baseExpression = expression;
+        for (let match of matches) {
+            baseExpression = baseExpression.replace(match[0], '0');
         }
+        try {
+            baseValue = Function('"use strict"; return (' + baseExpression + ')')() || 0;
+        } catch (e) {
+            baseValue = 0;
+        }
+        
+        // 构建详细格式：表达式=基础值+{骰子结果}(小计)+{骰子结果}(小计)=总计
+        let detailStr = expression + '=';
+        if (baseValue !== 0) {
+            detailStr += baseValue;
+        }
+        
+        // 添加每个骰子组的详细信息
+        for (let i = 0; i < diceDetails.length; i++) {
+            const diceDetail = diceDetails[i];
+            const diceSum = diceSums[i];
+            
+            if (baseValue !== 0 || i > 0) {
+                detailStr += '+';
+            }
+            detailStr += `${diceDetail}(${diceSum})`;
+        }
+        
+        detailStr += `=${finalValue}`;
+        const detail = detailStr;
         
         return {
             detail: detail,
@@ -467,9 +549,19 @@ function performShouhunCheck(ctx, frontExpr, backExpr, modifiers) {
         let frontFinal = frontResolved;
         let backFinal = backResolved;
         
+        // 为前式和后式分别创建修正器对象
+        const frontModifiers = {
+            ...modifiers,
+            fixedD20: modifiers.frontFixedD20
+        };
+        const backModifiers = {
+            ...modifiers,
+            fixedD20: modifiers.backFixedD20
+        };
+        
         // 计算骰子结果
-        const frontRoll = rollDiceExpressionDetailed(ctx, frontFinal);
-        const backRoll = rollDiceExpressionDetailed(ctx, backFinal);
+        const frontRoll = rollDiceExpressionDetailed(ctx, frontFinal, frontModifiers);
+        const backRoll = rollDiceExpressionDetailed(ctx, backFinal, backModifiers);
         const frontResult = frontRoll.value;
         const backResult = backRoll.value;
 
@@ -495,72 +587,46 @@ function performShouhunCheck(ctx, frontExpr, backExpr, modifiers) {
         // 确保成功等级至少为0
         finalSuccess = Math.max(0, finalSuccess);
 
+        // 计算修正后的挑战值（用于显示）
+        let adjustedBackResult = backResult;
+        // 注意：对方奖励和惩罚只影响成功等级，不影响挑战值显示
+        // adjustedBackResult += modifiers.opponentBonus || 0;
+        // adjustedBackResult -= modifiers.opponentPenalty || 0;
+
         // 构建成功等级计算过程
         const baseSuccessValue = Math.floor((frontResult - backResult + 4) / 5);
         const totalD20Bonus = frontD20Bonus + backD20Bonus;
         
-        let successCalculation;
+        // 构建详细的成功等级计算显示
+        const baseDifference = frontResult - backResult;
+        let successCalculation = `max(0, (出值${frontResult} - 挑战值${backResult} + 4) / 5) = max(0, (${baseDifference} + 4) / 5) = max(0, ${Math.floor((baseDifference + 4) / 5)})`;
         
-        if (totalD20Bonus !== 0) {
-            // 有D20特殊效果时的显示格式
-            let d20EffectText = '';
-            if (frontD20Bonus !== 0) {
-                const frontD20Text = frontD20s.includes(20) ? '大成功!' : (frontD20s.includes(1) ? '大失败...' : '');
-                d20EffectText += `${frontD20Bonus > 0 ? '+' : ''}${frontD20Bonus}（${frontD20Text}）`;
-            }
-            if (backD20Bonus !== 0) {
-                const backD20Text = backD20s.includes(20) ? '大成功!' : (backD20s.includes(1) ? '大失败...' : '');
-                d20EffectText += `${backD20Bonus > 0 ? '+' : ''}${backD20Bonus}（${backD20Text}）`;
-            }
-            
-            successCalculation = `max(0, (${frontResult} - ${backResult} + 4) / 5)${d20EffectText} = max(0, ${baseSuccessValue})${totalD20Bonus > 0 ? '+' : ''}${totalD20Bonus} = ${finalSuccess}`;
-        } else {
-            // 无D20特殊效果时的简化显示
-            successCalculation = `max(0, (${frontResult} - ${backResult} + 4) / 5) = max(0, ${baseSuccessValue}) = ${finalSuccess}`;
+        // 添加修正项
+        if (modifiers.selfBonus) {
+            successCalculation += ` +己方奖励${modifiers.selfBonus}`;
         }
-
-        // 添加修正项说明
-        let modifierDetails = [];
-        if (modifiers.selfBonus) modifierDetails.push(`己方奖励+${modifiers.selfBonus}`);
-        if (modifiers.selfPenalty) modifierDetails.push(`己方惩罚-${modifiers.selfPenalty}`);
-        if (modifiers.opponentBonus) modifierDetails.push(`对方奖励-${modifiers.opponentBonus}`);
-        if (modifiers.opponentPenalty) modifierDetails.push(`对方惩罚+${modifiers.opponentPenalty}`);
-
-        if (frontD20Bonus !== 0) {
+        if (modifiers.selfPenalty) {
+            successCalculation += ` -己方惩罚${modifiers.selfPenalty}`;
+        }
+        if (modifiers.opponentBonus) {
+            successCalculation += ` -对方奖励${modifiers.opponentBonus}`;
+        }
+        if (modifiers.opponentPenalty) {
+            successCalculation += ` +对方惩罚${modifiers.opponentPenalty}`;
+        }
+        
+        // 当出值大于挑战值时显示前式D20效果（包括成功等级为0的成功情况）
+        if (frontResult > backResult && frontD20Bonus !== 0) {
             const frontD20Text = frontD20s.includes(20) ? '大成功!' : (frontD20s.includes(1) ? '大失败...' : '');
-            modifierDetails.push(`出值D20效果${frontD20Bonus > 0 ? '+' : ''}${frontD20Bonus}(${frontD20Text})`);
+            successCalculation += ` ${frontD20Bonus > 0 ? '+' : ''}${frontD20Bonus}（${frontD20Text}）`;
         }
-        if (backD20Bonus !== 0) {
-            const backD20Text = backD20s.includes(20) ? '大成功!' : (backD20s.includes(1) ? '大失败...' : '');
-            modifierDetails.push(`挑战值D20效果${backD20Bonus > 0 ? '+' : ''}${backD20Bonus}(${backD20Text})`);
-        }
-
-        // 如果有其他修正项（非D20特殊效果），使用详细显示
-        const otherModifiers = modifierDetails.filter(detail => !detail.includes('D20效果'));
-        if (otherModifiers.length > 0) {
-            successCalculation = `出值${frontResult} - 挑战值${backResult} = ${frontResult - backResult}`;
-            for (const detail of otherModifiers) {
-                successCalculation += ` ${detail.includes('-') ? '' : '+'}${detail.replace(/[+-]/, '')}`;
-            }
-            // 添加D20特殊效果
-            if (totalD20Bonus !== 0) {
-                let d20EffectText = '';
-                if (frontD20Bonus !== 0) {
-                    const frontD20Text = frontD20s.includes(20) ? '大成功!' : (frontD20s.includes(1) ? '大失败...' : '');
-                    d20EffectText += ` ${frontD20Bonus > 0 ? '+' : ''}出值D20效果${frontD20Bonus}（${frontD20Text}）`;
-                }
-                if (backD20Bonus !== 0) {
-                    const backD20Text = backD20s.includes(20) ? '大成功!' : (backD20s.includes(1) ? '大失败...' : '');
-                    d20EffectText += ` ${backD20Bonus > 0 ? '+' : ''}挑战值D20效果${backD20Bonus}（${backD20Text}）`;
-                }
-                successCalculation += d20EffectText;
-            }
-            successCalculation += ` = ${finalSuccess}`;
-        }
+        
+        successCalculation += ` = ${finalSuccess}`;
 
         const result = {
             frontResult,
             backResult,
+            adjustedBackResult, // 添加修正后的挑战值
             successLevel: finalSuccess,
             isSuccess: frontResult >= backResult,
             frontDetail: frontRoll.detail,
@@ -576,7 +642,9 @@ function performShouhunCheck(ctx, frontExpr, backExpr, modifiers) {
             resolvedBackExpr: backResolved,
             finalFrontExpr: frontFinal,
             finalBackExpr: backFinal,
-            skillReplacementOccurred: frontExpr !== frontResolved || backExpr !== backResolved
+            skillReplacementOccurred: frontExpr !== frontResolved || backExpr !== backResolved,
+            // 添加修正项信息
+            modifiers
         };
         
         return result;
@@ -603,37 +671,61 @@ function parseShouhunCommand(cmdText) {
         selfBonus: 0,
         selfPenalty: 0,
         opponentBonus: 0,
-        opponentPenalty: 0
+        opponentPenalty: 0,
+        frontFixedD20: null,  // 前式固定d20出目值
+        backFixedD20: null    // 后式固定d20出目值
     };
 
     let remaining = cmdText;
 
-    // 检测暗骰 - 支持.shh格式（不需要空格）
-    if (remaining.startsWith('h')) {
-        modifiers.isHidden = true;
-        if (remaining.startsWith('h ')) {
-            // 有空格的情况：.sh h 体质
-            remaining = remaining.substring(2);
-        } else if (remaining === 'h') {
-            // 只有h的情况：.sh h
-            remaining = remaining.substring(1);
-        } else {
-            // 无空格的情况：.shh体质
-            remaining = remaining.substring(1);
+    // 循环解析所有参数，直到没有更多参数为止
+    let hasMoreParams = true;
+    while (hasMoreParams) {
+        hasMoreParams = false;
+        
+        // 检测x数字格式（控制前式d20出目）
+        const fixedD20Match = remaining.match(/^x(\d+)\s*/);
+        if (fixedD20Match) {
+            const fixedValue = parseInt(fixedD20Match[1]);
+            if (fixedValue >= 1 && fixedValue <= 20) {
+                modifiers.frontFixedD20 = fixedValue;
+                remaining = remaining.substring(fixedD20Match[0].length);
+                hasMoreParams = true;
+                continue;
+            }
         }
-    }
 
-    // 解析奖励/惩罚
-    const bpMatch = remaining.match(/^([bp])(\d+)/);
-    if (bpMatch) {
-        const type = bpMatch[1];
-        const value = parseInt(bpMatch[2]);
-        if (type === 'b') {
-            modifiers.selfBonus = value;
-        } else {
-            modifiers.selfPenalty = value;
+        // 检测暗骰 - 支持.shh格式（不需要空格）
+        if (remaining.startsWith('h')) {
+            modifiers.isHidden = true;
+            if (remaining.startsWith('h ')) {
+                // 有空格的情况：.sh h 体质
+                remaining = remaining.substring(2);
+            } else if (remaining === 'h') {
+                // 只有h的情况：.sh h
+                remaining = remaining.substring(1);
+            } else {
+                // 无空格的情况：.shh体质
+                remaining = remaining.substring(1);
+            }
+            hasMoreParams = true;
+            continue;
         }
-        remaining = remaining.substring(bpMatch[0].length).trim();
+
+        // 解析奖励/惩罚
+        const bpMatch = remaining.match(/^([bp])(\d+)/);
+        if (bpMatch) {
+            const type = bpMatch[1];
+            const value = parseInt(bpMatch[2]);
+            if (type === 'b') {
+                modifiers.selfBonus = value;
+            } else {
+                modifiers.selfPenalty = value;
+            }
+            remaining = remaining.substring(bpMatch[0].length).trim();
+            hasMoreParams = true;
+            continue;
+        }
     }
 
 
@@ -645,28 +737,75 @@ function parseShouhunCommand(cmdText) {
 
     // 如果前式不包含骰子表达式，自动添加1d20
     if (frontExpr && !frontExpr.includes('d') && !frontExpr.match(/^\d+$/)) {
-        frontExpr = '1d20+' + frontExpr;
+        // 如果前式以+开头，直接拼接；否则添加+号
+        if (frontExpr.startsWith('+')) {
+            frontExpr = '1d20' + frontExpr;
+        } else {
+            frontExpr = '1d20+' + frontExpr;
+        }
     }
 
-    // 解析后式的奖励/惩罚
+    // 解析后式的参数（x、h、b、p）
     if (parts[1]) {
         backExpr = backExpr.trim();
-        const backBpMatch = backExpr.match(/^([bp])(\d+)\s*(.*)/);
-        if (backBpMatch) {
-            const type = backBpMatch[1];
-            const value = parseInt(backBpMatch[2]);
-            if (type === 'b') {
-                modifiers.opponentBonus = value;
-            } else {
-                modifiers.opponentPenalty = value;
+        
+        // 循环解析后式的所有参数，直到没有更多参数为止
+        let hasMoreBackParams = true;
+        while (hasMoreBackParams) {
+            hasMoreBackParams = false;
+            
+            // 检测后式的x数字格式（控制后式d20出目）
+            const backFixedD20Match = backExpr.match(/^x(\d+)\s*(.*)/);
+            if (backFixedD20Match) {
+                const fixedValue = parseInt(backFixedD20Match[1]);
+                if (fixedValue >= 1 && fixedValue <= 20) {
+                    // 后式的x参数只影响后式的fixedD20
+                    modifiers.backFixedD20 = fixedValue;
+                    backExpr = backFixedD20Match[2].trim() || '10';
+                    hasMoreBackParams = true;
+                    continue;
+                }
             }
-            backExpr = backBpMatch[3].trim() || '10';
+            
+            // 检测后式的暗骰
+            if (backExpr.startsWith('h')) {
+                modifiers.isHidden = true;
+                if (backExpr.startsWith('h ')) {
+                    backExpr = backExpr.substring(2);
+                } else if (backExpr === 'h') {
+                    backExpr = '10';
+                } else {
+                    backExpr = backExpr.substring(1);
+                }
+                hasMoreBackParams = true;
+                continue;
+            }
+            
+            // 解析后式的奖励/惩罚
+            const backBpMatch = backExpr.match(/^([bp])(\d+)\s*(.*)/);
+            if (backBpMatch) {
+                const type = backBpMatch[1];
+                const value = parseInt(backBpMatch[2]);
+                if (type === 'b') {
+                    modifiers.opponentBonus = value;
+                } else {
+                    modifiers.opponentPenalty = value;
+                }
+                backExpr = backBpMatch[3].trim() || '10';
+                hasMoreBackParams = true;
+                continue;
+            }
         }
     }
 
     // 如果后式不包含骰子表达式且不是纯数字，自动添加1d20
     if (backExpr && !backExpr.includes('d') && !backExpr.match(/^\d+$/)) {
-        backExpr = '1d20+' + backExpr;
+        // 如果后式以+开头，直接拼接；否则添加+号
+        if (backExpr.startsWith('+')) {
+            backExpr = '1d20' + backExpr;
+        } else {
+            backExpr = '1d20+' + backExpr;
+        }
     }
 
     return { frontExpr, backExpr, modifiers };
@@ -694,7 +833,12 @@ function handleShouhunCheck(mctx, msg, cmdArgs) {
         // 检查前式是否包含d20，如果没有则添加默认骰
         if (!frontExpr.toLowerCase().includes('d20')) {
             if (frontExpr) {
-                frontExpr = `1d20+${frontExpr}`;
+                // 如果前式以+开头，不要重复添加+号
+                if (frontExpr.startsWith('+')) {
+                    frontExpr = `1d20${frontExpr}`;
+                } else {
+                    frontExpr = `1d20+${frontExpr}`;
+                }
             } else {
                 frontExpr = '1d20';
             }
@@ -703,15 +847,48 @@ function handleShouhunCheck(mctx, msg, cmdArgs) {
         // 如果没有挑战值，添加默认挑战值10
         if (!backExpr) {
             backExpr = '10';
+        } else {
+            // 检查后式是否为纯数字，如果不是且不包含d20，则添加默认骰
+            const isNumeric = /^\d+$/.test(backExpr.trim());
+            if (!isNumeric && !backExpr.toLowerCase().includes('d20')) {
+                // 如果后式以+开头，不要重复添加+号
+                if (backExpr.startsWith('+')) {
+                    backExpr = `1d20${backExpr}`;
+                } else {
+                    backExpr = `1d20+${backExpr}`;
+                }
+            }
         }
         
         // 重新构建指令文本
-        let modifierText = '';
-        if (tempParsed.modifiers.isHidden) modifierText += 'h';
-        if (tempParsed.modifiers.selfBonus > 0) modifierText += `b${tempParsed.modifiers.selfBonus}`;
-        if (tempParsed.modifiers.selfPenalty > 0) modifierText += `p${tempParsed.modifiers.selfPenalty}`;
+        let frontModifierText = '';
+        if (tempParsed.modifiers.frontFixedD20 !== null) frontModifierText += `x${tempParsed.modifiers.frontFixedD20}`;
+        if (tempParsed.modifiers.isHidden) frontModifierText += 'h';
+        if (tempParsed.modifiers.selfBonus > 0) frontModifierText += `b${tempParsed.modifiers.selfBonus}`;
+        if (tempParsed.modifiers.selfPenalty > 0) frontModifierText += `p${tempParsed.modifiers.selfPenalty}`;
         
-        processedCmdText = `${modifierText}${frontExpr}#${backExpr}`;
+        let backModifierText = '';
+        if (tempParsed.modifiers.backFixedD20 !== null) backModifierText += `x${tempParsed.modifiers.backFixedD20}`;
+        if (tempParsed.modifiers.opponentBonus > 0) backModifierText += `b${tempParsed.modifiers.opponentBonus}`;
+        if (tempParsed.modifiers.opponentPenalty > 0) backModifierText += `p${tempParsed.modifiers.opponentPenalty}`;
+        
+        // 构建前式部分
+        let frontPart = '';
+        if (frontModifierText && frontExpr) {
+            frontPart = `${frontModifierText} ${frontExpr}`;
+        } else {
+            frontPart = `${frontModifierText}${frontExpr}`;
+        }
+        
+        // 构建后式部分
+        let backPart = '';
+        if (backModifierText && backExpr) {
+            backPart = `${backModifierText} ${backExpr}`;
+        } else {
+            backPart = `${backModifierText}${backExpr}`;
+        }
+        
+        processedCmdText = `${frontPart}#${backPart}`;
     }
 
     try {
@@ -721,37 +898,66 @@ function handleShouhunCheck(mctx, msg, cmdArgs) {
         // 格式化结果消息
         let replyText = `${seal.format(mctx, '{$t玩家}') || '未知'}进行了命运的掷骰！\n--------------------\n`;
         
-        // 格式化骰子表达式显示
-        function formatDiceExpression(originalExpr, resolvedExpr, finalExpr, rollResult, rollDetail) {
-            // 如果有技能替换，显示完整的替换过程
-            if (originalExpr !== resolvedExpr) {
-                return `${originalExpr} → ${finalExpr}=${rollResult}[${rollDetail}]`;
-            } else {
-                // 简化格式：表达式=结果[详细结果]
-                return `${finalExpr}=${rollResult}[${rollDetail}]`;
-            }
+        // 详细出值显示格式
+        function formatFrontResult() {
+            let frontText = `出值：${result.frontDetail}`;
+            // 不在出值行显示大成功大失败标记，只在结果行显示
+            return frontText;
         }
         
-        // 显示出值表达式
-        replyText += `出值表达式：${formatDiceExpression(result.originalFrontExpr, result.resolvedFrontExpr, result.finalFrontExpr, result.frontResult, result.frontDetail)}\n`;
+        // 详细挑战值显示格式
+         function formatBackResult() {
+             let backText = `挑战值：${result.backDetail}`;
+             // 后式大成功大失败不在挑战值行显示，只在成功等级计算中显示
+             return backText;
+         }
         
-        // 显示挑战值
-        replyText += `挑战值：${result.backResult}[${result.backResult}]\n`;
+        replyText += `${formatFrontResult()}\n`;
+        replyText += `${formatBackResult()}\n`;
         
-        // 分隔线
+        // 添加结果判断行（在第二个分隔线之前）
+        function formatResultLine() {
+            let resultText = '';
+            
+            // 判断主要结果类型
+            if (result.frontResult <= result.backResult) {
+                // 真正的失败：出值小于等于挑战值
+                resultText = '（失败）唔，失败了，真是可惜呢...不过这也命运的选择不是？';
+            } else if (result.successLevel === 0) {
+                // 成功等级为0但出值大于挑战值
+                resultText = '（成功）嗯...多多少少算是可以了，不过你只向往这种平庸的成功吗？';
+            } else {
+                // 正常成功：显示成功等级
+                resultText = '（成功）能做到这样也是很不错了~还要继续加油呀！';
+            }
+            
+            // 检查是否有大成功或大失败，但要考虑实际成败结果
+            const hasFrontCrit = result.frontD20s.includes(20);
+            const hasFrontFumble = result.frontD20s.includes(1);
+            const hasBackCrit = result.backD20s.includes(20);
+            const hasBackFumble = result.backD20s.includes(1);
+            
+            // 优先级：前式大失败 > 前式大成功 > 普通成败结果
+            // 注意：挑战大成功大失败不单独显示，只影响成败判断
+            if (hasFrontFumble) {
+                resultText = '（大失败）诶...这可不是我的问题...！';
+            } else if (hasFrontCrit) {
+                resultText = '（大成功）哼哼，这也有我的一份力吧~！';
+            }
+            // 如果没有前式大成功大失败，则保持原有的成败判断结果
+            
+            return resultText;
+        }
+        
+        replyText += `${formatResultLine()}\n`;
         replyText += `--------------------\n`;
         
-        // 显示成功等级计算
-        replyText += `成功等级：${result.successCalculation}\n`;
-        
-        // 显示结果
-        if (result.isSuccess) {
-            replyText += `结果：成功等级：${result.successLevel}`;
-        } else {
-            replyText += `结果：失败`;
+        // 成功等级显示格式
+        function formatSuccessLevel() {
+            return `成功等级：${result.successLevel}`;
         }
-
-        // 调试信息：显示读取到的属性值（已移除，使用 .sh debug 查看详细信息）
+        
+        replyText += `${formatSuccessLevel()}`;
 
         // D20特殊效果已计算在成功等级中，不再单独显示
 
@@ -796,16 +1002,17 @@ cmdShouhun.allowDelegate = true;
 cmdShouhun.help = `=== 狩魂者TRPG骰子插件 ===
 【角色卡管理】
 .set sh/狩魂者 - 切换到狩魂者游戏系统
-.sn sh- 更改狩魂者名片
+.sn sh 自动更改狩魂者名片
 
 【检定指令】
 .sh [参数][表达式][#[参数][表达式]]
 .sh @某人 [参数][表达式][#[参数][表达式]] - 代骰功能
 
 【参数说明】
-h     - 暗骰，结果私发给投掷者
-b数字 - 奖励成功等级（如：b2）
-p数字 - 惩罚成功等级（如：p1）
+h     - 暗骰，结果私发给投掷者（前式和后式均可使用）
+b数字 - 奖励成功等级（如：b2，前式增加己方奖励，后式增加对方奖励）
+p数字 - 惩罚成功等级（如：p1，前式增加己方惩罚，后式增加对方惩罚）
+x数字 - 控制d20出目（如：x15，固定d20出目为15，前式和后式均可使用）
 #     - 分隔前式(出值)和后式(挑战值)
 
 【默认骰机制】
@@ -814,26 +1021,10 @@ p数字 - 惩罚成功等级（如：p1）
 • 没有挑战值时，默认使用挑战值10
 
 【示例】
-.sh 调查
-  → 自动变为：1d20+调查#10
+如要进行一次有三个加骰和两个时髦骰的掷骰，则输入.sh3d4+2d6
 
-.sh 体质d4#12
-  → 自动变为：1d20+体质d4#12
-
-.sh 3d6+2#15
-  → 自动变为：1d20+3d6+2#15
-
-.sh 1d20+调查#15
-  → 已包含d20，不会重复添加
-
-.sh b2 运动#p1 体魄
-  → 奖励2等级的运动检定，对抗惩罚1等级的体魄
-
-.sh h 说服
-  → 暗骰的说服检定
-
-.sh @bug猫 调查
-  → 代替张三进行调查技能检定
+如要进行一次D20的值被固定为15，有四个加骰和三个时髦骰，连续第二次进行反击的掷骰，去对抗敌人有两个加骰的攻击掷骰
+则输入.shp2x15+4d4+3d6#d20+2d4
 
 【成功等级计算】
 成功等级 = max(0, (出值 - 挑战值 + 4) / 5)
@@ -851,10 +1042,5 @@ cmdShouhun.solve = (ctx, msg, cmdArgs) => {
 // 注册指令
 ext.cmdMap['sh'] = cmdShouhun;
 
-// 注释：角色卡设置功能已移除，使用海豹自带的.st指令进行属性录入
-
 // 注册扩展
 seal.ext.register(ext);
-
-// 注释：移除了set和sn命令的自定义实现，避免与系统命令冲突
-// 狩魂者规则切换应该通过游戏系统模板的setConfig自动处理
